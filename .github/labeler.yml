@@ -253,6 +253,11 @@ integration:valkey:
       - any-glob-to-any-file: "integrations/valkey/**/*"
       - any-glob-to-any-file: ".github/workflows/valkey.yml"
 
+integration:vespa:
+  - changed-files:
+      - any-glob-to-any-file: "integrations/vespa/**/*"
+      - any-glob-to-any-file: ".github/workflows/vespa.yml"
+
 integration:watsonx:
   - changed-files:
       - any-glob-to-any-file: "integrations/watsonx/**/*"
