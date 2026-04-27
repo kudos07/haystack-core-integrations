@@ -4,13 +4,13 @@
 
 | Name                                                                              |    Stmts |     Miss |   Branch |   BrPart |   Cover |   Missing |
 |---------------------------------------------------------------------------------- | -------: | -------: | -------: | -------: | ------: | --------: |
-| src/haystack\_integrations/components/connectors/jina/reader.py                   |       46 |        4 |       10 |        4 |     86% |66-\>68, 124-\>127, 135-136, 140-141 |
+| src/haystack\_integrations/components/connectors/jina/reader.py                   |       57 |        2 |       10 |        2 |     94% |65-\>67, 127-128 |
 | src/haystack\_integrations/components/connectors/jina/reader\_mode.py             |       15 |        0 |        2 |        0 |    100% |           |
-| src/haystack\_integrations/components/embedders/jina/document\_embedder.py        |       83 |        7 |       26 |        4 |     90% |108, 134, 148-149, 185, 224, 226 |
-| src/haystack\_integrations/components/embedders/jina/document\_image\_embedder.py |       86 |       11 |       22 |        4 |     84% |113, 179-188, 201, 205-206, 238 |
-| src/haystack\_integrations/components/embedders/jina/text\_embedder.py            |       53 |        7 |       16 |        4 |     84% |93, 115, 128-129, 155, 157, 165 |
-| src/haystack\_integrations/components/rankers/jina/ranker.py                      |       55 |        9 |       16 |        4 |     79% |66-67, 104-105, 111, 162, 174-175, 179 |
-| **TOTAL**                                                                         |  **338** |   **38** |   **92** |   **20** | **86%** |           |
+| src/haystack\_integrations/components/embedders/jina/document\_embedder.py        |      110 |        7 |       28 |        4 |     92% |105, 131, 145-146, 177, 179, 187 |
+| src/haystack\_integrations/components/embedders/jina/document\_image\_embedder.py |      113 |        3 |       26 |        2 |     96% |110, 198, 211 |
+| src/haystack\_integrations/components/embedders/jina/text\_embedder.py            |       70 |        5 |       16 |        4 |     90% |90, 112, 143, 145, 152 |
+| src/haystack\_integrations/components/rankers/jina/ranker.py                      |       71 |        1 |       18 |        0 |     99% |       108 |
+| **TOTAL**                                                                         |  **436** |   **18** |  **100** |   **12** | **94%** |           |
 
 
 ## Setup coverage badge
