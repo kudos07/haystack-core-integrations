@@ -1,10 +1,6 @@
 from typing import Any
 
 from haystack import Document, component, default_from_dict, default_to_dict
-try:
-    from haystack.document_stores.types import FilterPolicy, apply_filter_policy
-except ImportError:  # pragma: no cover
-    from haystack.document_stores.types.filter_policy import FilterPolicy, apply_filter_policy
 
 from haystack_integrations.document_stores.vespa import VespaDocumentStore
 
@@ -19,7 +15,6 @@ class VespaKeywordRetriever:
         document_store: VespaDocumentStore,
         filters: dict[str, Any] | None = None,
         top_k: int = 10,
-        filter_policy: str | FilterPolicy = FilterPolicy.REPLACE,
         ranking: str | None = None,
     ) -> None:
         """
@@ -28,7 +23,6 @@ class VespaKeywordRetriever:
         :param document_store: Vespa document store instance.
         :param filters: Static retriever filters.
         :param top_k: Default number of documents to retrieve.
-        :param filter_policy: Runtime filter merge policy.
         :param ranking: Optional Vespa ranking profile.
         """
         if not isinstance(document_store, VespaDocumentStore):
@@ -38,9 +32,6 @@ class VespaKeywordRetriever:
         self._document_store = document_store
         self._filters = filters or {}
         self._top_k = top_k
-        self._filter_policy = (
-            filter_policy if isinstance(filter_policy, FilterPolicy) else FilterPolicy.from_str(filter_policy)
-        )
         self._ranking = ranking
 
     def to_dict(self) -> dict[str, Any]:
@@ -54,7 +45,6 @@ class VespaKeywordRetriever:
             document_store=self._document_store.to_dict(),
             filters=self._filters,
             top_k=self._top_k,
-            filter_policy=self._filter_policy.value,
             ranking=self._ranking,
         )
 
@@ -69,7 +59,6 @@ class VespaKeywordRetriever:
         data["init_parameters"]["document_store"] = VespaDocumentStore.from_dict(
             data["init_parameters"]["document_store"]
         )
-        data["init_parameters"]["filter_policy"] = FilterPolicy.from_str(data["init_parameters"]["filter_policy"])
         return default_from_dict(cls, data)
 
     @component.output_types(documents=list[Document])
@@ -84,7 +73,7 @@ class VespaKeywordRetriever:
         :param top_k: Optional runtime `top_k`.
         :returns: Retrieved documents.
         """
-        applied_filters = apply_filter_policy(self._filter_policy, self._filters, filters or {})
+        applied_filters = filters or self._filters
         documents = self._document_store._bm25_retrieval(
             query=query,
             filters=applied_filters or None,

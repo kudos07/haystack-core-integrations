@@ -18,7 +18,6 @@ def test_keyword_retriever_run():
     retriever = VespaKeywordRetriever(
         document_store=document_store,
         filters={"field": "meta.category", "operator": "==", "value": "news"},
-        filter_policy="replace",
         ranking="bm25",
     )
     result = retriever.run("hello")
