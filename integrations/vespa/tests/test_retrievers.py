@@ -1,7 +1,7 @@
 from unittest.mock import Mock
 
 from haystack import Document
-from haystack.document_stores.types import FilterPolicy
+from haystack.document_stores.types.filter_policy import FilterPolicy
 from haystack.utils import Secret
 
 from haystack_integrations.components.retrievers.vespa import VespaEmbeddingRetriever, VespaKeywordRetriever
