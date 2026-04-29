@@ -1,7 +1,6 @@
 from unittest.mock import Mock
 
 from haystack import Document
-from haystack.document_stores.types.filter_policy import FilterPolicy
 from haystack.utils import Secret
 
 from haystack_integrations.components.retrievers.vespa import VespaEmbeddingRetriever, VespaKeywordRetriever
@@ -19,7 +18,7 @@ def test_keyword_retriever_run():
     retriever = VespaKeywordRetriever(
         document_store=document_store,
         filters={"field": "meta.category", "operator": "==", "value": "news"},
-        filter_policy=FilterPolicy.REPLACE,
+        filter_policy="replace",
         ranking="bm25",
     )
     result = retriever.run("hello")
