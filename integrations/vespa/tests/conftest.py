@@ -7,6 +7,8 @@
 import os
 import subprocess
 import time
+import urllib.error
+import urllib.request
 
 import pytest
 
@@ -30,10 +32,21 @@ def deployed_vespa_app():
         ],
         check=True,
     )
-    subprocess.run(
-        ["docker", "exec", "vespa", "bash", "-lc", "/opt/vespa/bin/vespa-status deploy --wait 300"],
-        check=True,
-    )
+    _wait_for_vespa_endpoint("http://localhost:8080/ApplicationStatus", deadline_s=300)
+
+
+def _wait_for_vespa_endpoint(url: str, *, deadline_s: float) -> None:
+    deadline = time.monotonic() + deadline_s
+    while time.monotonic() < deadline:
+        try:
+            with urllib.request.urlopen(url, timeout=5) as response:  # noqa: S310
+                if response.status == 200:
+                    return
+        except (OSError, urllib.error.URLError):
+            pass
+        time.sleep(1)
+    msg = f"Timed out waiting for Vespa endpoint {url}"
+    raise AssertionError(msg)
 
 
 def wait_until_documents_count(document_store, expected_count: int, *, deadline_s: float = 90) -> None:
