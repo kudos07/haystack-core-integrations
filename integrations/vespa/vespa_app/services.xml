@@ -10,7 +10,7 @@
       <document type="doc" mode="index" />
     </documents>
     <nodes>
-      <node hostalias="node1" />
+      <node hostalias="node1" distribution-key="0" />
     </nodes>
   </content>
 </services>
