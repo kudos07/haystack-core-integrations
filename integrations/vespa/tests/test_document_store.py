@@ -9,6 +9,7 @@ import pytest
 from haystack import Document, default_from_dict
 from haystack.document_stores.errors import DuplicateDocumentError
 from haystack.document_stores.types import DuplicatePolicy
+from haystack.errors import FilterError
 from haystack.testing.document_store import (
     CountDocumentsByFilterTest,
     DocumentStoreBaseExtendedTests,
@@ -166,6 +167,11 @@ def test_string_equality_filters_use_contains():
     assert yql_filter == 'category contains "news"'
 
 
+def test_string_relational_filters_require_iso_dates():
+    with pytest.raises(FilterError):
+        _normalize_filters({"field": "meta.number", "operator": ">", "value": "1"}, content_field="content")
+
+
 def test_normalize_filters_multi_condition_not_clause():
     yql_filter = _normalize_filters(
         {
@@ -267,6 +273,34 @@ def test_filter_documents(store):
     assert documents[0].meta == {"category": "news"}
 
 
+def test_filter_documents_with_none_value_uses_python_fallback(store):
+    store._query_documents = Mock(  # type:ignore[method-assign]
+        return_value=[
+            Document(id="1", content="with number", meta={"number": 1}),
+            Document(id="2", content="without number"),
+        ]
+    )
+
+    documents = store.filter_documents(filters={"field": "meta.number", "operator": "==", "value": None})
+
+    assert [document.id for document in documents] == ["2"]
+    store._query_documents.assert_called_once_with(where="true", top_k=store.query_limit)
+
+
+def test_filter_documents_with_iso_date_comparison_uses_python_fallback(store):
+    store._query_documents = Mock(  # type:ignore[method-assign]
+        return_value=[
+            Document(id="1", content="old", meta={"date": "1969-07-21T20:17:40"}),
+            Document(id="2", content="new", meta={"date": "1989-11-09T17:53:00"}),
+        ]
+    )
+
+    documents = store.filter_documents(filters={"field": "meta.date", "operator": ">", "value": "1972-12-11T19:54:58"})
+
+    assert [document.id for document in documents] == ["2"]
+    store._query_documents.assert_called_once_with(where="true", top_k=store.query_limit)
+
+
 def test_bm25_retrieval_uses_bm25_ranking_by_default(store):
     store._app.query.return_value = DummyResponse({"root": {"children": []}})
 
@@ -283,6 +317,7 @@ def test_embedding_retrieval_uses_semantic_ranking_by_default(store):
 
     _, kwargs = store._app.query.call_args
     assert kwargs["body"]["ranking"] == "semantic"
+    assert "targetHits:10" in kwargs["body"]["yql"]
 
 
 def test_get_documents_by_id(store):

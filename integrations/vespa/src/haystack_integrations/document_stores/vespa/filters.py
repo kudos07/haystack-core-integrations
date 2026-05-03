@@ -8,7 +8,6 @@ import json
 from datetime import datetime
 from typing import Any
 
-from dateutil import parser
 from haystack.errors import FilterError
 
 from .errors import VespaDocumentStoreFilterError
@@ -61,12 +60,9 @@ def _validate_ordered_filter_value(operator: str, value: Any) -> None:
     if isinstance(value, str):
         try:
             datetime.fromisoformat(value)
-        except (ValueError, TypeError):
-            try:
-                parser.parse(value)
-            except (ValueError, TypeError) as exc:
-                msg = "Can't compare strings using relational operators unless they parse as dates (ISO)."
-                raise FilterError(msg) from exc
+        except (ValueError, TypeError) as exc:
+            msg = "Can't compare strings using relational operators unless they are ISO-formatted dates."
+            raise FilterError(msg) from exc
         return
 
     msg = "Unsupported filter value type for relational operators. Use numbers or ISO/date-parseable strings."

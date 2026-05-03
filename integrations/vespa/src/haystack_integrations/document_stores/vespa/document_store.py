@@ -7,12 +7,14 @@ from __future__ import annotations
 import inspect
 import os
 from collections.abc import Iterable
+from datetime import datetime
 from typing import Any
 
 from haystack import default_to_dict, logging
 from haystack.dataclasses import Document
 from haystack.document_stores.errors import DuplicateDocumentError
 from haystack.document_stores.types import DuplicatePolicy
+from haystack.utils.filters import document_matches_filter
 
 from vespa.application import Vespa
 
@@ -27,6 +29,25 @@ HTTP_NOT_FOUND = 404
 DEFAULT_BM25_RANKING = "bm25"
 DEFAULT_SEMANTIC_RANKING = "semantic"
 VESPA_CLOUD_SECRET_TOKEN_ENV = "VESPA_CLOUD_SECRET_TOKEN"
+
+
+def _filters_need_python_fallback(filters: dict[str, Any]) -> bool:
+    if "conditions" in filters:
+        conditions = filters["conditions"]
+        if not isinstance(conditions, list):
+            return False
+        return any(isinstance(condition, dict) and _filters_need_python_fallback(condition) for condition in conditions)
+
+    value = filters.get("value")
+    if value is None:
+        return True
+    if filters.get("operator") in {">", ">=", "<", "<="} and isinstance(value, str):
+        try:
+            datetime.fromisoformat(value)
+        except (TypeError, ValueError):
+            return False
+        return True
+    return False
 
 
 class VespaDocumentStore:
@@ -285,6 +306,10 @@ class VespaDocumentStore:
         :param filters: Haystack metadata filters.
         :returns: Matching documents.
         """
+        if filters and _filters_need_python_fallback(filters):
+            documents = self._query_documents(where="true", top_k=self.query_limit)
+            return [document for document in documents if document_matches_filter(filters=filters, document=document)]
+
         where = _normalize_filters(filters, content_field=self.content_field) if filters else "true"
         return self._query_documents(where=where, top_k=self.query_limit)
 
@@ -361,11 +386,8 @@ class VespaDocumentStore:
             raise ValueError(msg)
 
         where = _normalize_filters(filters, content_field=self.content_field) if filters else "true"
-        nearest = (
-            f"{{targetHits:{target_hits}}}nearestNeighbor({self.embedding_field}, {query_tensor_name})"
-            if target_hits
-            else f"nearestNeighbor({self.embedding_field}, {query_tensor_name})"
-        )
+        effective_target_hits = target_hits or top_k
+        nearest = f"{{targetHits:{effective_target_hits}}}nearestNeighbor({self.embedding_field}, {query_tensor_name})"
         clauses = [where, nearest] if where != "true" else [nearest]
         body = {f"input.query({query_tensor_name})": query_embedding}
         return self._query_documents(where=" and ".join(clauses), top_k=top_k, ranking=ranking, body=body)
