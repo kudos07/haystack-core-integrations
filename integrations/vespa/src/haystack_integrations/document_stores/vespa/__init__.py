@@ -2,7 +2,6 @@
 #
 # SPDX-License-Identifier: Apache-2.0
 
-from .document_store import VespaDocumentStore
-from .filters import _normalize_filters
+from .document_store import DEFAULT_BM25_RANKING, DEFAULT_SEMANTIC_RANKING, VespaDocumentStore
 
-__all__ = ["VespaDocumentStore", "_normalize_filters"]
+__all__ = ["DEFAULT_BM25_RANKING", "DEFAULT_SEMANTIC_RANKING", "VespaDocumentStore"]

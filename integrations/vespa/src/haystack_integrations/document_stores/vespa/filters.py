@@ -1,7 +1,15 @@
+# SPDX-FileCopyrightText: 2022-present deepset GmbH <info@deepset.ai>
+#
+# SPDX-License-Identifier: Apache-2.0
+
 from __future__ import annotations
 
 import json
+from datetime import datetime
 from typing import Any
+
+from dateutil import parser
+from haystack.errors import FilterError
 
 from .errors import VespaDocumentStoreFilterError
 
@@ -28,6 +36,43 @@ def _normalize_field_name(field: str, *, content_field: str) -> str:
     return field
 
 
+def _validate_ordered_filter_value(operator: str, value: Any) -> None:
+    """
+    Raise FilterError when a comparison operator cannot use the supplied value type.
+
+    Aligns loosely with haystack.utils.filters behaviour for relational operators.
+    """
+    if operator not in {">", ">=", "<", "<="}:
+        return
+
+    if isinstance(value, bool):
+        return
+
+    if isinstance(value, (int, float)):
+        return
+
+    if isinstance(value, list):
+        msg = (
+            f"Filter value can't be of type {type(value)} using operators "
+            "'>', '>=', '<', '<='. See Haystack metadata filtering documentation."
+        )
+        raise FilterError(msg)
+
+    if isinstance(value, str):
+        try:
+            datetime.fromisoformat(value)
+        except (ValueError, TypeError):
+            try:
+                parser.parse(value)
+            except (ValueError, TypeError) as exc:
+                msg = "Can't compare strings using relational operators unless they parse as dates (ISO)."
+                raise FilterError(msg) from exc
+        return
+
+    msg = "Unsupported filter value type for relational operators. Use numbers or ISO/date-parseable strings."
+    raise FilterError(msg)
+
+
 def _convert_comparison(
     field: str,
     operator: str,
@@ -36,6 +81,11 @@ def _convert_comparison(
     content_field: str,
 ) -> str:
     normalized_field = _normalize_field_name(field, content_field=content_field)
+
+    if operator in {">", ">=", "<", "<="} and value is None:
+        return "false"
+
+    _validate_ordered_filter_value(operator, value)
 
     if operator == "==":
         if _is_scalar_string_value(value):
@@ -98,10 +148,12 @@ def _normalize_filters(filters: dict[str, Any] | None, *, content_field: str) ->
 
     if operator == "NOT":
         conditions = filters.get("conditions")
-        if not isinstance(conditions, list) or len(conditions) != 1:
-            msg = "NOT filters must contain exactly one nested condition"
+        if not isinstance(conditions, list) or not conditions:
+            msg = "NOT filters must contain a non-empty 'conditions' list"
             raise VespaDocumentStoreFilterError(msg)
-        return f"!( {_normalize_filters(conditions[0], content_field=content_field)} )"
+        normalized_parts = [_normalize_filters(condition, content_field=content_field) for condition in conditions]
+        merged = " and ".join(normalized_parts)
+        return f"!( ( {merged} ) )"
 
     field = filters.get("field")
     comparison = filters.get("operator")
@@ -109,4 +161,8 @@ def _normalize_filters(filters: dict[str, Any] | None, *, content_field: str) ->
         msg = "Leaf filters must contain 'field' and 'operator'"
         raise VespaDocumentStoreFilterError(msg)
 
-    return _convert_comparison(field, comparison, filters.get("value"), content_field=content_field)
+    if "value" not in filters:
+        msg = "Leaf filters must include a 'value' key."
+        raise VespaDocumentStoreFilterError(msg)
+
+    return _convert_comparison(field, comparison, filters["value"], content_field=content_field)

@@ -1,14 +1,90 @@
-import os
-from unittest.mock import Mock
+# SPDX-FileCopyrightText: 2022-present deepset GmbH <info@deepset.ai>
+#
+# SPDX-License-Identifier: Apache-2.0
+
+import random
+from unittest.mock import Mock, patch
 
 import pytest
-from haystack import Document
+from haystack import Document, default_from_dict
+from haystack.document_stores.errors import DuplicateDocumentError
 from haystack.document_stores.types import DuplicatePolicy
-from haystack.utils import Secret
+from haystack.testing.document_store import (
+    CountDocumentsByFilterTest,
+    DocumentStoreBaseExtendedTests,
+    GetMetadataFieldsInfoTest,
+)
 
 from haystack_integrations.document_stores.vespa import VespaDocumentStore
 from haystack_integrations.document_stores.vespa.errors import VespaDocumentStoreError
 from haystack_integrations.document_stores.vespa.filters import _normalize_filters
+
+VESPA_TEST_EMBEDDING_DIM = 3
+
+
+def _random_embeddings_vespa() -> list[float]:
+    return [random.random() for _ in range(VESPA_TEST_EMBEDDING_DIM)]  # noqa: S311
+
+
+VESPA_TEST_EMBEDDING_1 = _random_embeddings_vespa()
+VESPA_TEST_EMBEDDING_2 = _random_embeddings_vespa()
+
+
+def create_vespa_filterable_docs() -> list[Document]:
+    """Haystack ``create_filterable_docs`` shape with Vespa-compatible 3-dimensional embeddings."""
+
+    documents: list[Document] = []
+
+    def emb() -> list[float]:
+        return _random_embeddings_vespa()
+
+    for i in range(3):
+        documents.extend(
+            [
+                Document(
+                    content=f"A Foo Document {i}",
+                    meta={
+                        "name": f"name_{i}",
+                        "page": "100",
+                        "chapter": "intro",
+                        "number": 2,
+                        "date": "1969-07-21T20:17:40",
+                    },
+                    embedding=emb(),
+                ),
+                Document(
+                    content=f"A Bar Document {i}",
+                    meta={
+                        "name": f"name_{i}",
+                        "page": "123",
+                        "chapter": "abstract",
+                        "number": -2,
+                        "date": "1972-12-11T19:54:58",
+                    },
+                    embedding=emb(),
+                ),
+                Document(
+                    content=f"A Foobar Document {i}",
+                    meta={
+                        "name": f"name_{i}",
+                        "page": "90",
+                        "chapter": "conclusion",
+                        "number": -10,
+                        "date": "1989-11-09T17:53:00",
+                    },
+                    embedding=emb(),
+                ),
+                Document(
+                    content=f"Document {i} without embedding",
+                    meta={"name": f"name_{i}", "no_embedding": True, "chapter": "conclusion"},
+                ),
+                Document(
+                    content=f"Doc {i} with zeros emb", meta={"name": "zeros_doc"}, embedding=VESPA_TEST_EMBEDDING_1
+                ),
+                Document(content=f"Doc {i} with ones emb", meta={"name": "ones_doc"}, embedding=VESPA_TEST_EMBEDDING_2),
+            ]
+        )
+    return documents
 
 
 class DummyResponse:
@@ -26,7 +102,7 @@ class DummyResponse:
 @pytest.fixture
 def store():
     document_store = VespaDocumentStore(
-        url=Secret.from_token("http://localhost"),
+        url="http://localhost",
         schema="docs",
         namespace="docs",
         metadata_fields=["category", "author"],
@@ -36,15 +112,18 @@ def store():
 
 
 def test_to_dict_from_dict():
-    os.environ["VESPA_TEST_URL"] = "http://localhost"
     document_store = VespaDocumentStore(
-        url=Secret.from_env_var("VESPA_TEST_URL"),
+        url="http://localhost",
+        cert="/path/to/cert.pem",
+        key="/path/to/key.pem",
+        vespa_cloud_secret_token="token",
+        additional_headers={"X-Custom-Header": "test"},
         schema="docs",
         namespace="docs",
         metadata_fields=["category"],
     )
 
-    restored = VespaDocumentStore.from_dict(document_store.to_dict())
+    restored = default_from_dict(VespaDocumentStore, document_store.to_dict())
 
     assert restored.to_dict() == document_store.to_dict()
 
@@ -53,6 +132,29 @@ def test_count_documents(store):
     store._app.query.return_value = DummyResponse({"root": {"fields": {"totalCount": 7}}})
 
     assert store.count_documents() == 7
+
+
+def test_app_initializes_pyvespa_with_auth_parameters():
+    document_store = VespaDocumentStore(
+        url="https://example.vespa-app.cloud",
+        port=443,
+        cert="/path/to/cert.pem",
+        key="/path/to/key.pem",
+        vespa_cloud_secret_token="token",
+        additional_headers={"X-Custom-Header": "test"},
+    )
+
+    with patch("haystack_integrations.document_stores.vespa.document_store.Vespa") as vespa:
+        _ = document_store.app
+
+    vespa.assert_called_once_with(
+        url="https://example.vespa-app.cloud",
+        port=443,
+        cert="/path/to/cert.pem",
+        key="/path/to/key.pem",
+        vespa_cloud_secret_token="token",
+        additional_headers={"X-Custom-Header": "test"},
+    )
 
 
 def test_string_equality_filters_use_contains():
@@ -64,8 +166,24 @@ def test_string_equality_filters_use_contains():
     assert yql_filter == 'category contains "news"'
 
 
+def test_normalize_filters_multi_condition_not_clause():
+    yql_filter = _normalize_filters(
+        {
+            "operator": "NOT",
+            "conditions": [
+                {"field": "meta.number", "operator": "==", "value": 100},
+                {"field": "meta.name", "operator": "==", "value": "name_0"},
+            ],
+        },
+        content_field="content",
+    )
+
+    assert yql_filter == '!( ( number = 100 and name contains "name_0" ) )'
+
+
 def test_write_documents(store):
     store._app.feed_data_point.return_value = DummyResponse({})
+    store._app.get_data.return_value = DummyResponse({}, status_code=404)
 
     written = store.write_documents(
         [Document(id="1", content="hello", embedding=[0.1, 0.2], meta={"category": "news", "ignored": "x"})]
@@ -91,11 +209,34 @@ def test_write_documents_duplicate_skip(store):
     store._app.feed_data_point.assert_not_called()
 
 
+def test_write_documents_duplicate_policy_fail_raises_duplicate_document_error(store):
+    store._app.feed_data_point.return_value = DummyResponse({})
+    store._app.get_data.side_effect = [
+        DummyResponse({}, status_code=404),
+        DummyResponse({"fields": {"id": "1"}}, status_code=200),
+    ]
+
+    assert store.write_documents([Document(id="1", content="first")]) == 1
+
+    with pytest.raises(DuplicateDocumentError):
+        store.write_documents([Document(id="1", content="second")], policy=DuplicatePolicy.FAIL)
+
+
 def test_write_documents_duplicate_check_surfaces_backend_error(store):
     store._app.get_data.return_value = DummyResponse({"message": "boom"}, status_code=500)
 
     with pytest.raises(VespaDocumentStoreError):
         store.write_documents([Document(id="1", content="hello")], policy=DuplicatePolicy.SKIP)
+
+
+def test_write_documents_invalid_inputs_raise(store):
+    store._app.get_data.return_value = DummyResponse({}, status_code=404)
+
+    with pytest.raises(ValueError, match="Please provide a list of Documents"):
+        store.write_documents("not a list")  # type:ignore[arg-type]
+
+    with pytest.raises(ValueError, match="Please provide a list of Documents"):
+        store.write_documents(["bad"])  # type:ignore[arg-type]
 
 
 def test_filter_documents(store):
@@ -124,6 +265,24 @@ def test_filter_documents(store):
     assert documents[0].id == "1"
     assert documents[0].score == 3.5
     assert documents[0].meta == {"category": "news"}
+
+
+def test_bm25_retrieval_uses_bm25_ranking_by_default(store):
+    store._app.query.return_value = DummyResponse({"root": {"children": []}})
+
+    store._bm25_retrieval(query="hello")
+
+    _, kwargs = store._app.query.call_args
+    assert kwargs["body"]["ranking"] == "bm25"
+
+
+def test_embedding_retrieval_uses_semantic_ranking_by_default(store):
+    store._app.query.return_value = DummyResponse({"root": {"children": []}})
+
+    store._embedding_retrieval(query_embedding=[0.1, 0.2, 0.3])
+
+    _, kwargs = store._app.query.call_args
+    assert kwargs["body"]["ranking"] == "semantic"
 
 
 def test_get_documents_by_id(store):
@@ -158,14 +317,44 @@ def test_delete_by_filter(store):
 
 
 def test_delete_all_documents(store):
-    store._app.query.side_effect = [
-        DummyResponse({"root": {"children": [{"id": "id:docs:docs::1", "fields": {"content": "hello"}}]}}),
-        DummyResponse({"root": {"children": []}}),
-    ]
-    store._app.delete_data.return_value = DummyResponse({})
+    store._app.delete_all_docs.return_value = None
 
     store.delete_all_documents()
 
-    _, kwargs = store._app.delete_data.call_args
-    assert kwargs["schema"] == "docs"
-    assert kwargs["data_id"] == "1"
+    store._app.delete_all_docs.assert_called_once_with(
+        content_cluster_name="content",
+        schema="docs",
+        namespace="docs",
+    )
+
+
+@pytest.mark.integration
+class TestVespaDocumentStoreBase(
+    DocumentStoreBaseExtendedTests,
+    CountDocumentsByFilterTest,
+    GetMetadataFieldsInfoTest,
+):
+    """
+    Runs Haystack ``DocumentStoreBaseExtendedTests`` (+ count-by-filter / metadata-info) against Dockerized Vespa.
+    Requires ``VESPA_RUN_INTEGRATION_TESTS=1`` and ``docker compose up`` (see project CI workflow).
+    """
+
+    @pytest.fixture
+    def filterable_docs(self) -> list[Document]:
+        """Vespa embeddings are restricted to tensor dimension 3 in ``vespa_app/schemas/doc.sd``."""
+        return create_vespa_filterable_docs()
+
+    def assert_documents_are_equal(self, received: list[Document], expected: list[Document]) -> None:
+        assert len(received) == len(expected)
+        rs = sorted(received, key=lambda d: str(d.id))
+        es = sorted(expected, key=lambda d: str(d.id))
+        for r, e in zip(rs, es, strict=True):
+            assert str(r.id) == str(e.id)
+            assert r.content == e.content
+            assert r.meta == e.meta
+
+    def test_write_documents(self, document_store):  # type:ignore[override]
+        docs = [Document(id="1", content="test doc")]
+        assert document_store.write_documents(docs) == 1
+        with pytest.raises(DuplicateDocumentError):
+            document_store.write_documents(docs, DuplicatePolicy.FAIL)

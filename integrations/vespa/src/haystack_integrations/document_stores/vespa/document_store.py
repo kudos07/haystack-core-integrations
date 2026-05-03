@@ -1,11 +1,18 @@
+# SPDX-FileCopyrightText: 2022-present deepset GmbH <info@deepset.ai>
+#
+# SPDX-License-Identifier: Apache-2.0
+
 from __future__ import annotations
 
+import inspect
+import os
+from collections.abc import Iterable
 from typing import Any
 
-from haystack import default_from_dict, default_to_dict, logging
+from haystack import default_to_dict, logging
 from haystack.dataclasses import Document
+from haystack.document_stores.errors import DuplicateDocumentError
 from haystack.document_stores.types import DuplicatePolicy
-from haystack.utils import Secret, deserialize_secrets_inplace
 
 from vespa.application import Vespa
 
@@ -17,6 +24,9 @@ logger = logging.getLogger(__name__)
 DEFAULT_QUERY_LIMIT = 400
 DEFAULT_BULK_BATCH_SIZE = 100
 HTTP_NOT_FOUND = 404
+DEFAULT_BM25_RANKING = "bm25"
+DEFAULT_SEMANTIC_RANKING = "semantic"
+VESPA_CLOUD_SECRET_TOKEN_ENV = "VESPA_CLOUD_SECRET_TOKEN"
 
 
 class VespaDocumentStore:
@@ -27,8 +37,12 @@ class VespaDocumentStore:
     def __init__(
         self,
         *,
-        url: Secret = Secret.from_env_var("VESPA_URL"),
+        url: str | None = None,
         port: int = 8080,
+        cert: str | None = None,
+        key: str | None = None,
+        vespa_cloud_secret_token: str | None = None,
+        additional_headers: dict[str, str] | None = None,
         content_cluster_name: str = "content",
         schema: str = "doc",
         namespace: str | None = None,
@@ -42,8 +56,13 @@ class VespaDocumentStore:
         """
         Create a new Vespa document store.
 
-        :param url: Vespa endpoint base URL.
+        :param url: Vespa endpoint base URL. If omitted, the `VESPA_URL` environment variable is used.
         :param port: Vespa HTTP port.
+        :param cert: Path to the data plane certificate file for mTLS authentication.
+        :param key: Path to the data plane key file for mTLS authentication.
+        :param vespa_cloud_secret_token: Vespa Cloud data plane secret token for token authentication.
+            If omitted, the ``VESPA_CLOUD_SECRET_TOKEN`` environment variable is used when set, matching pyvespa.
+        :param additional_headers: Additional headers to send to the Vespa application.
         :param content_cluster_name: Vespa content cluster name.
         :param schema: Vespa schema name to read from and write to.
         :param namespace: Vespa namespace. Defaults to the schema name when omitted.
@@ -57,61 +76,61 @@ class VespaDocumentStore:
         :param query_limit: Maximum number of documents returned by bulk queries. Defaults to 400 to
             stay within Vespa's common query hit limit unless explicitly overridden.
         """
-        self._url = url
-        self._port = port
-        self._content_cluster_name = content_cluster_name
-        self._schema = schema
-        self._namespace = namespace or schema
-        self._groupname = groupname
-        self._content_field = content_field
-        self._embedding_field = embedding_field
-        self._id_field = id_field
-        self._metadata_fields = metadata_fields or []
-        self._query_limit = query_limit
+        self.url = url or os.environ.get("VESPA_URL", "")
+        self.port = port
+        self.cert = cert
+        self.key = key
+        self.vespa_cloud_secret_token = vespa_cloud_secret_token or os.environ.get(VESPA_CLOUD_SECRET_TOKEN_ENV)
+        self.additional_headers = additional_headers
+        self.content_cluster_name = content_cluster_name
+        self.schema = schema
+        self.namespace = namespace or schema
+        self.groupname = groupname
+        self.content_field = content_field
+        self.embedding_field = embedding_field
+        self.id_field = id_field
+        self.metadata_fields = metadata_fields
+        self.query_limit = query_limit
         self._app: Any | None = None
 
     @property
     def app(self) -> Any:
-        """Return the underlying `pyvespa` client."""
+        """
+        Return the underlying ``pyvespa`` ``Vespa`` HTTP client.
+
+        It is built from this store's ``url``, ``port``, and authentication settings
+        (``cert``, ``key``, ``vespa_cloud_secret_token``, ``additional_headers``) so mTLS, bearer token,
+        and custom headers from the constructor (or environment) are applied.
+        """
         if self._app is None:
-            resolved_url = self._url.resolve_value()
-            if not resolved_url:
+            if not self.url:
                 msg = "A Vespa URL is required to initialize the document store"
                 raise VespaDocumentStoreConfigError(msg)
-            self._app = Vespa(url=resolved_url, port=self._port)
+            self._app = Vespa(
+                url=self.url,
+                port=self.port,
+                cert=self.cert,
+                key=self.key,
+                vespa_cloud_secret_token=self.vespa_cloud_secret_token,
+                additional_headers=self.additional_headers,
+            )
         return self._app
 
     def to_dict(self) -> dict[str, Any]:
         """
         Serialize the document store to a dictionary.
 
+        Uses the same init-parameter names as :meth:`__init__` and ``default_to_dict`` so nested serialization stays
+        aligned with Haystack's default component serialization.
+
         :returns: Serialized document store data.
         """
-        return default_to_dict(
-            self,
-            url=self._url.to_dict(),
-            port=self._port,
-            content_cluster_name=self._content_cluster_name,
-            schema=self._schema,
-            namespace=self._namespace,
-            groupname=self._groupname,
-            content_field=self._content_field,
-            embedding_field=self._embedding_field,
-            id_field=self._id_field,
-            metadata_fields=self._metadata_fields,
-            query_limit=self._query_limit,
-        )
-
-    @classmethod
-    def from_dict(cls, data: dict[str, Any]) -> VespaDocumentStore:
-        """
-        Deserialize the document store from a dictionary.
-
-        :param data: Serialized document store data.
-        :returns: Deserialized document store.
-        """
-        deserialize_secrets_inplace(data["init_parameters"], ["url"])
-        return default_from_dict(cls, data)
+        init_parameters: dict[str, Any] = {}
+        for name, param in inspect.signature(self.__class__.__init__).parameters.items():
+            if name == "self" or param.kind in (param.VAR_POSITIONAL, param.VAR_KEYWORD):
+                continue
+            init_parameters[name] = getattr(self, name)
+        return default_to_dict(self, **init_parameters)
 
     def count_documents(self) -> int:
         """
@@ -129,7 +148,7 @@ class VespaDocumentStore:
         :param filters: Haystack metadata filters.
         :returns: Count of matching documents.
         """
-        where = _normalize_filters(filters, content_field=self._content_field)
+        where = _normalize_filters(filters, content_field=self.content_field)
         response = self._query(yql=self._build_yql(where=where, limit=0), hits=0)
         return int(response.get("root", {}).get("fields", {}).get("totalCount", 0))
 
@@ -141,18 +160,29 @@ class VespaDocumentStore:
         :param policy: Duplicate handling policy.
         :returns: Number of documents written.
         """
+        if (
+            not isinstance(documents, Iterable)
+            or isinstance(documents, (str, bytes))
+            or any(not isinstance(doc, Document) for doc in documents)
+        ):
+            msg = "Please provide a list of Documents."
+            raise ValueError(msg)
+
+        if policy == DuplicatePolicy.NONE:
+            policy = DuplicatePolicy.FAIL
+
         written = 0
         for document in documents:
             if policy == DuplicatePolicy.FAIL and self._document_exists(document.id):
-                msg = f"Document with id '{document.id}' already exists in Vespa"
-                raise VespaDocumentStoreError(msg)
+                msg = f"Document with id '{document.id}' already exists."
+                raise DuplicateDocumentError(msg)
             if policy == DuplicatePolicy.SKIP and self._document_exists(document.id):
                 continue
 
             response = self.app.feed_data_point(
-                schema=self._schema,
-                namespace=self._namespace,
-                groupname=self._groupname,
+                schema=self.schema,
+                namespace=self.namespace,
+                groupname=self.groupname,
                 data_id=document.id,
                 fields=self._document_to_vespa_fields(document),
             )
@@ -168,9 +198,9 @@ class VespaDocumentStore:
         """
         for document_id in document_ids:
             response = self.app.delete_data(
-                schema=self._schema,
-                namespace=self._namespace,
-                groupname=self._groupname,
+                schema=self.schema,
+                namespace=self.namespace,
+                groupname=self.groupname,
                 data_id=document_id,
             )
             status_code = getattr(response, "status_code", 200)
@@ -178,11 +208,16 @@ class VespaDocumentStore:
                 self._ensure_success(response, f"Failed to delete document '{document_id}' from Vespa")
 
     def delete_all_documents(self) -> None:
-        """Delete all documents in the configured Vespa schema."""
-        documents = self._collect_matching_documents()
-        if not documents:
-            return
-        self.delete_documents([document.id for document in documents])
+        """
+        Delete all documents for this store's schema, namespace, and content cluster.
+
+        Implemented with pyvespa ``Vespa.delete_all_docs`` (Document V1 bulk delete).
+        """
+        self.app.delete_all_docs(
+            content_cluster_name=self.content_cluster_name,
+            schema=self.schema,
+            namespace=self.namespace,
+        )
 
     def delete_by_filter(self, filters: dict[str, Any]) -> int:
         """
@@ -207,9 +242,9 @@ class VespaDocumentStore:
         updated = 0
         for document in documents:
             response = self.app.update_data(
-                schema=self._schema,
-                namespace=self._namespace,
-                groupname=self._groupname,
+                schema=self.schema,
+                namespace=self.namespace,
+                groupname=self.groupname,
                 data_id=document.id,
                 fields=dict(meta),
                 create=False,
@@ -228,9 +263,9 @@ class VespaDocumentStore:
         documents: list[Document] = []
         for document_id in document_ids:
             response = self.app.get_data(
-                schema=self._schema,
-                namespace=self._namespace,
-                groupname=self._groupname,
+                schema=self.schema,
+                namespace=self.namespace,
+                groupname=self.groupname,
                 data_id=document_id,
                 raise_on_not_found=False,
             )
@@ -250,8 +285,8 @@ class VespaDocumentStore:
         :param filters: Haystack metadata filters.
         :returns: Matching documents.
         """
-        where = _normalize_filters(filters, content_field=self._content_field) if filters else "true"
-        return self._query_documents(where=where, top_k=self._query_limit)
+        where = _normalize_filters(filters, content_field=self.content_field) if filters else "true"
+        return self._query_documents(where=where, top_k=self.query_limit)
 
     def get_metadata_fields_info(self) -> dict[str, dict[str, str]]:
         """
@@ -259,8 +294,11 @@ class VespaDocumentStore:
 
         :returns: Field metadata information.
         """
+        if self.count_documents() == 0:
+            return {}
+
         info = {"content": {"type": "text"}}
-        for field in self._metadata_fields:
+        for field in self.metadata_fields or []:
             info[field] = {"type": "keyword"}
         return info
 
@@ -270,7 +308,7 @@ class VespaDocumentStore:
         *,
         top_k: int = 10,
         filters: dict[str, Any] | None = None,
-        ranking: str | None = None,
+        ranking: str | None = DEFAULT_BM25_RANKING,
     ) -> list[Document]:
         """
         Retrieve documents using Vespa lexical search.
@@ -278,14 +316,16 @@ class VespaDocumentStore:
         :param query: Query text.
         :param top_k: Maximum number of documents to return.
         :param filters: Optional Haystack metadata filters.
-        :param ranking: Optional Vespa ranking profile.
+        :param ranking: Vespa rank profile for lexical matches, for example `bm25` for a profile that uses
+            `bm25(content)`. Defaults to `bm25`. Pass `None` to use the schema default. See
+            https://docs.vespa.ai/en/basics/ranking.html.
         :returns: Retrieved documents.
         """
         if not query:
             msg = "query must be a non-empty string"
             raise ValueError(msg)
 
-        where = _normalize_filters(filters, content_field=self._content_field) if filters else "true"
+        where = _normalize_filters(filters, content_field=self.content_field) if filters else "true"
         clauses = [where, "userQuery()"] if where != "true" else ["userQuery()"]
         return self._query_documents(where=" and ".join(clauses), top_k=top_k, query=query, ranking=ranking)
 
@@ -295,7 +335,7 @@ class VespaDocumentStore:
         *,
         top_k: int = 10,
         filters: dict[str, Any] | None = None,
-        ranking: str | None = None,
+        ranking: str | None = DEFAULT_SEMANTIC_RANKING,
         query_tensor_name: str = "query_embedding",
         target_hits: int | None = None,
     ) -> list[Document]:
@@ -305,20 +345,26 @@ class VespaDocumentStore:
         :param query_embedding: Query embedding vector.
         :param top_k: Maximum number of documents to return.
         :param filters: Optional Haystack metadata filters.
-        :param ranking: Optional Vespa ranking profile.
-        :param query_tensor_name: Query tensor name referenced in YQL.
-        :param target_hits: Optional Vespa nearest-neighbor `targetHits` value.
+        :param ranking: Vespa rank profile after nearest-neighbor retrieval, for example `semantic` for a profile
+            that scores with `closeness(field, embedding)`. Defaults to `semantic`. Pass `None` to use the schema
+            default. See https://docs.vespa.ai/en/basics/ranking.html.
+        :param query_tensor_name: Name of the query tensor in YQL and in `input.query(...)` in your rank profile.
+            For example `query_embedding` matches the default `semantic` profile under `vespa_app/`. See
+            https://docs.vespa.ai/en/nearest-neighbor-search.html.
+        :param target_hits: Optional nearest-neighbor `targetHits` value, for example `10` or `100`, controlling how
+            many neighbors are considered per content node before first-phase ranking. See
+            https://docs.vespa.ai/en/nearest-neighbor-search.html.
         :returns: Retrieved documents.
         """
         if not query_embedding:
             msg = "query_embedding must be a non-empty list of floats"
             raise ValueError(msg)
 
-        where = _normalize_filters(filters, content_field=self._content_field) if filters else "true"
+        where = _normalize_filters(filters, content_field=self.content_field) if filters else "true"
         nearest = (
-            f"{{targetHits:{target_hits}}}nearestNeighbor({self._embedding_field}, {query_tensor_name})"
+            f"{{targetHits:{target_hits}}}nearestNeighbor({self.embedding_field}, {query_tensor_name})"
             if target_hits
-            else f"nearestNeighbor({self._embedding_field}, {query_tensor_name})"
+            else f"nearestNeighbor({self.embedding_field}, {query_tensor_name})"
         )
         clauses = [where, nearest] if where != "true" else [nearest]
         body = {f"input.query({query_tensor_name})": query_embedding}
@@ -369,9 +415,9 @@ class VespaDocumentStore:
 
     def _document_exists(self, document_id: str) -> bool:
         response = self.app.get_data(
-            schema=self._schema,
-            namespace=self._namespace,
-            groupname=self._groupname,
+            schema=self.schema,
+            namespace=self.namespace,
+            groupname=self.groupname,
             data_id=document_id,
             raise_on_not_found=False,
         )
@@ -390,20 +436,20 @@ class VespaDocumentStore:
         raise VespaDocumentStoreError(error_message)
 
     def _build_yql(self, *, where: str, limit: int, offset: int = 0) -> str:
-        return f"select * from sources {self._schema} where {where} limit {limit} offset {offset}"  # noqa: S608
+        return f"select * from sources {self.schema} where {where} limit {limit} offset {offset}"  # noqa: S608
 
     def _document_to_vespa_fields(self, document: Document) -> dict[str, Any]:
         doc_dict = document.to_dict(flatten=False)
         fields: dict[str, Any] = {}
 
         if document.content is not None:
-            fields[self._content_field] = document.content
+            fields[self.content_field] = document.content
         if document.embedding is not None:
-            fields[self._embedding_field] = document.embedding
+            fields[self.embedding_field] = document.embedding
 
         metadata = doc_dict.get("meta", {}) or {}
-        if self._metadata_fields:
-            for key in self._metadata_fields:
+        if self.metadata_fields:
+            for key in self.metadata_fields:
                 if key in metadata:
                     fields[key] = metadata[key]
         else:
@@ -413,10 +459,10 @@ class VespaDocumentStore:
     def _collect_matching_documents(
         self, *, filters: dict[str, Any] | None = None, batch_size: int = DEFAULT_BULK_BATCH_SIZE
     ) -> list[Document]:
-        where = _normalize_filters(filters, content_field=self._content_field) if filters else "true"
+        where = _normalize_filters(filters, content_field=self.content_field) if filters else "true"
         documents: list[Document] = []
         offset = 0
-        effective_batch_size = min(batch_size, self._query_limit)
+        effective_batch_size = min(batch_size, self.query_limit)
 
         while True:
             batch = self._query_documents(where=where, top_k=effective_batch_size, offset=offset)
@@ -430,7 +476,7 @@ class VespaDocumentStore:
         return documents
 
     def _fields_to_document(self, fields: dict[str, Any], *, score: float | None, fallback_id: str | None) -> Document:
-        document_id = fields.get(self._id_field) or fallback_id
+        document_id = fields.get(self.id_field) or fallback_id
         if document_id is None:
             msg = "Vespa response does not contain a document id"
             raise VespaDocumentStoreError(msg)
@@ -438,15 +484,15 @@ class VespaDocumentStore:
         meta = {
             key: value
             for key, value in fields.items()
-            if key not in {self._id_field, self._content_field, self._embedding_field}
+            if key not in {self.id_field, self.content_field, self.embedding_field}
         }
-        if self._metadata_fields:
-            meta = {key: value for key, value in meta.items() if key in self._metadata_fields}
+        if self.metadata_fields:
+            meta = {key: value for key, value in meta.items() if key in self.metadata_fields}
 
         return Document(
             id=str(document_id),
-            content=fields.get(self._content_field),
-            embedding=fields.get(self._embedding_field),
+            content=fields.get(self.content_field),
+            embedding=fields.get(self.embedding_field),
             meta=meta,
             score=score,
         )

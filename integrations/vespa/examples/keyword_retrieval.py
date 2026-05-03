@@ -21,6 +21,7 @@ logger = logging.getLogger(__name__)
 # This example assumes your Vespa schema already exists and contains:
 # - a text field named `content`
 # - metadata fields `category` and `author`
+# - a ranking profile named `bm25`
 document_store = VespaDocumentStore(
     schema="doc",
     namespace="doc",

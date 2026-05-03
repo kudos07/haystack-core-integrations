@@ -54,7 +54,6 @@ querying.add_component(
     VespaEmbeddingRetriever(
         document_store=document_store,
         top_k=2,
-        ranking="semantic",
         query_tensor_name="query_embedding",
     ),
 )
