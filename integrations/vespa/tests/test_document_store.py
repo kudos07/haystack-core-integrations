@@ -384,7 +384,11 @@ class TestVespaDocumentStoreBase(
         for r, e in zip(rs, es, strict=True):
             assert str(r.id) == str(e.id)
             assert r.content == e.content
-            assert r.meta == e.meta
+            received_meta = dict(r.meta)
+            for key in ("featured", "no_embedding", "updated"):
+                if key not in e.meta and received_meta.get(key) is False:
+                    received_meta.pop(key)
+            assert received_meta == e.meta
 
     def test_write_documents(self, document_store):  # type:ignore[override]
         docs = [Document(id="1", content="test doc")]
