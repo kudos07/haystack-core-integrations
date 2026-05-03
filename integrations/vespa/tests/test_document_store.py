@@ -340,6 +340,39 @@ class TestVespaDocumentStoreBase(
     """
 
     @pytest.fixture
+    def document_store(self, deployed_vespa_app, request):  # noqa: ARG002
+        """Override the inherited base fixture with a Docker-backed Vespa store."""
+        metadata_fields = [
+            "category",
+            "author",
+            "name",
+            "page",
+            "chapter",
+            "number",
+            "date",
+            "no_embedding",
+            "year",
+            "status",
+            "updated",
+            "extra_field",
+            "featured",
+            "priority",
+            "rating",
+            "age",
+        ]
+        store = VespaDocumentStore(
+            url="http://localhost",
+            schema="doc",
+            namespace="doc",
+            content_field="content",
+            embedding_field="embedding",
+            metadata_fields=metadata_fields,
+        )
+        store.delete_all_documents()
+        yield store
+        store.delete_all_documents()
+
+    @pytest.fixture
     def filterable_docs(self) -> list[Document]:
         """Vespa embeddings are restricted to tensor dimension 3 in ``vespa_app/schemas/doc.sd``."""
         return create_vespa_filterable_docs()
