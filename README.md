@@ -4,11 +4,11 @@
 
 | Name                                                                            |    Stmts |     Miss |   Branch |   BrPart |   Cover |   Missing |
 |-------------------------------------------------------------------------------- | -------: | -------: | -------: | -------: | ------: | --------: |
-| src/haystack\_integrations/components/embedders/ollama/document\_embedder.py    |       74 |        7 |       16 |        5 |     87% |100-104, 115, 177-178, 204, 239 |
-| src/haystack\_integrations/components/embedders/ollama/text\_embedder.py        |       24 |        0 |        0 |        0 |    100% |           |
-| src/haystack\_integrations/components/generators/ollama/chat/chat\_generator.py |      227 |        3 |       72 |        9 |     96% |62, 143-\>145, 145-\>147, 147-\>155, 421-\>425, 427-\>384, 486-487, 501-\>505, 507-\>510 |
-| src/haystack\_integrations/components/generators/ollama/generator.py            |       71 |        0 |       12 |        4 |     95% |65-\>67, 67-\>75, 187-\>189, 223-\>220 |
-| **TOTAL**                                                                       |  **396** |   **10** |  **100** |   **18** | **94%** |           |
+| src/haystack\_integrations/components/embedders/ollama/document\_embedder.py    |       75 |        7 |       16 |        5 |     87% |107-111, 122, 186-187, 213, 248 |
+| src/haystack\_integrations/components/embedders/ollama/text\_embedder.py        |       22 |        0 |        0 |        0 |    100% |           |
+| src/haystack\_integrations/components/generators/ollama/chat/chat\_generator.py |      234 |        3 |       72 |        7 |     97% |63, 144-\>146, 146-\>148, 148-\>156, 410-\>414, 478-479, 492-\>496 |
+| src/haystack\_integrations/components/generators/ollama/generator.py            |       73 |        0 |       12 |        4 |     95% |66-\>68, 68-\>76, 195-\>197, 231-\>228 |
+| **TOTAL**                                                                       |  **404** |   **10** |  **100** |   **16** | **95%** |           |
 
 
 ## Setup coverage badge
