@@ -4,11 +4,11 @@
 
 | Name                                                                            |    Stmts |     Miss |   Branch |   BrPart |   Cover |   Missing |
 |-------------------------------------------------------------------------------- | -------: | -------: | -------: | -------: | ------: | --------: |
-| src/haystack\_integrations/components/embedders/ollama/document\_embedder.py    |       74 |       44 |       16 |        0 |     33% |99-106, 112-128, 137-151, 159-181, 200-215, 235-250 |
-| src/haystack\_integrations/components/embedders/ollama/text\_embedder.py        |       24 |        7 |        0 |        0 |     71% |81-89, 108-117 |
-| src/haystack\_integrations/components/generators/ollama/chat/chat\_generator.py |      227 |       44 |       72 |        7 |     77% |62, 143-\>145, 145-\>147, 147-\>155, 421-\>425, 427-\>384, 463-533, 694 |
-| src/haystack\_integrations/components/generators/ollama/generator.py            |       71 |       35 |       12 |        1 |     45% |63-75, 187-\>189, 195-199, 206-211, 219-225, 231-236, 261-278 |
-| **TOTAL**                                                                       |  **396** |  **130** |  **100** |    **8** | **63%** |           |
+| src/haystack\_integrations/components/embedders/ollama/document\_embedder.py    |       75 |       30 |       16 |        1 |     55% |106-113, 119-135, 186-187, 209-224, 244-259 |
+| src/haystack\_integrations/components/embedders/ollama/text\_embedder.py        |       22 |        0 |        0 |        0 |    100% |           |
+| src/haystack\_integrations/components/generators/ollama/chat/chat\_generator.py |      234 |        5 |       72 |        9 |     95% |63, 144-\>146, 146-\>148, 148-\>156, 410-\>414, 478-479, 492-\>496, 499, 692 |
+| src/haystack\_integrations/components/generators/ollama/generator.py            |       73 |       35 |       12 |        1 |     46% |64-76, 195-\>197, 203-207, 214-219, 227-233, 239-244, 269-286 |
+| **TOTAL**                                                                       |  **404** |   **70** |  **100** |   **11** | **80%** |           |
 
 
 ## Setup coverage badge
